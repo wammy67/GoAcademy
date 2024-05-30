@@ -3,62 +3,125 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"time"
+	"sync"
 )
 
 type HTTPClient interface {
-    Get(url string) (*http.Response, error)
+	Get(url string) (*http.Response, error)
 }
 
-var myClient = &http.Client{Timeout: 10 * time.Second}
-
-func getJson(client HTTPClient, url string, target any) error {
-    r, err := client.Get(url)
-    if err != nil {
-        return err
-    }
-    defer r.Body.Close()
-
-    return json.NewDecoder(r.Body).Decode(target)
+func NewBeverageService(client HTTPClient) *BeverageService {
+	return &BeverageService{
+		client: client,
+	}
 }
 
-func GetCoffeess(client HTTPClient) Coffees {
-coffees := new(Coffees) 
-getJson(client, "https://api.sampleapis.com/coffee/hot", coffees)
-
-return (*coffees)
+type BeverageService struct {
+	client HTTPClient
 }
 
-func GetWines(client HTTPClient) Wines {
-	wines := new(Wines) 
-	getJson(client, "https://api.sampleapis.com/wines/reds", wines)
-	
-	return (*wines)
+func (b *BeverageService) GetBoth() Beverages {
+	var wg sync.WaitGroup
+	beveragesChan := make(chan Beverage)
+
+	wg.Add(2)
+    
+	// Fetch coffees
+	go func() {
+		defer wg.Done()
+		coffees := b.GetCoffees()
+		for _, coffee := range coffees {
+			beveragesChan <- coffee
+		}
+	}()
+
+	// Fetch wines
+	go func() {
+		defer wg.Done()
+		wines := b.GetWines()
+		for _, wine := range wines {
+			beveragesChan <- wine
+		}
+	}()
+
+	go func() {
+		wg.Wait()
+		close(beveragesChan)
+	}()
+
+	var beverages Beverages
+	for beverage := range beveragesChan {
+		beverages = append(beverages, beverage)
+	}
+
+	return beverages
 }
 
+func (b *BeverageService) GetCoffees() Beverages {
+	coffees := new(Coffees)
+	b.getJson("https://api.sampleapis.com/coffee/hot", coffees)
+	var beverages Beverages
+	for _, coffee := range *coffees {
+		beverages = append(beverages, coffee)
+	}
+	//fmt.Println(beverages, "coffee nika")
+	return beverages
+}
+
+func (b *BeverageService) GetWines() Beverages {
+	wines := new(Wines)
+	b.getJson("https://api.sampleapis.com/wines/reds", wines)
+	var beverages Beverages
+	for _, wine := range *wines {
+		beverages = append(beverages, wine)
+	}
+   // fmt.Println(beverages, "wines nika")
+	return beverages
+}
+
+func (b *BeverageService) getJson(url string, target any) error {
+	r, err := b.client.Get(url)
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+
+	return json.NewDecoder(r.Body).Decode(target)
+}
+
+type Beverage interface {
+	GetTitle() string
+	GetID() int
+}
 
 type Coffee struct {
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Ingredients []string `json:"ingredients"`
-	Image       string   `json:"image"`
-	ID          int      `json:"id"`
-}
-
-type Coffees []Coffee
-
-type Rating struct {
-    Average  string `json:"average"`
-    Reviews  string `json:"reviews"`
+	Title string `json:"title"`
+	ID    int    `json:"id"`
 }
 
 type Wine struct {
-    Winery   string `json:"winery"`
-    Wine     string `json:"wine"`
-    Rating   Rating `json:"rating"`
-    Location string `json:"location"`
-    Image    string `json:"image"`
-    ID       int    `json:"id"`
+	Title string `json:"wine"`
+	ID    int    `json:"id"`
 }
 
+type Beverages []Beverage
+
+type Coffees []Coffee
+
 type Wines []Wine
+
+func (c Coffee) GetTitle() string {
+	return c.Title
+}
+
+func (c Coffee) GetID() int {
+	return c.ID
+}
+
+func (w Wine) GetTitle() string {
+	return w.Title
+}
+
+func (w Wine) GetID() int {
+	return w.ID
+}
